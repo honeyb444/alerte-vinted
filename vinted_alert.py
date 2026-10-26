@@ -8,6 +8,7 @@ Optionnel, en plus ou à la place de Discord :
 """
 import json
 import os
+import re
 import smtplib
 import sys
 import time
@@ -35,10 +36,15 @@ MAIL_TO = os.environ.get("MAIL_TO", "").strip() or GMAIL_USER
 
 
 def fetch_items():
+    """Lit la page de résultats (HTML) et repère les liens d'articles.
+
+    L'ancienne API JSON de Vinted n'est plus accessible : on lit donc la page
+    que Vinted génère côté serveur pour la recherche.
+    """
     parsed = urlparse(SEARCH_URL)
     host = parsed.netloc
     params = [(k, v) for k, v in parse_qsl(parsed.query) if k not in ("order", "page", "time")]
-    params += [("order", "newest_first"), ("per_page", "30")]
+    params.append(("order", "newest_first"))
 
     session = requests.Session()
     session.headers.update({
@@ -47,18 +53,38 @@ def fetch_items():
             "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
         ),
         "Accept-Language": "fr-FR,fr;q=0.9",
-        "Accept": "application/json, text/plain, */*",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     })
-    # Première visite pour récupérer les cookies de session
-    session.get(f"https://{host}/", timeout=20)
-    r = session.get(f"https://{host}/api/v2/catalog/items", params=params, timeout=20)
+    r = session.get(f"https://{host}{parsed.path}", params=params, timeout=25)
     if r.status_code != 200:
-        fail(f"Vinted a repondu HTTP {r.status_code} : {r.text[:150]}")
-    return host, r.json().get("items", [])
+        fail(f"Vinted a repondu HTTP {r.status_code} : {r.text[:120]}")
+
+    html = r.text
+    # Les liens apparaissent sous la forme /items/123456-titre-de-l-article
+    # (parfois avec des antislashs dans le JSON intégré à la page)
+    found = re.findall(r"items\\?/(\d{6,})-([a-z0-9][a-z0-9\-]*)", html)
+    items, seen_ids = [], set()
+    for item_id, slug in found:
+        item_id = int(item_id)
+        if item_id in seen_ids:
+            continue
+        seen_ids.add(item_id)
+        items.append({
+            "id": item_id,
+            "title": slug.replace("-", " "),
+            "url": f"https://{host}/items/{item_id}-{slug}",
+        })
+    if not items:
+        m = re.search(r"<title>(.*?)</title>", html, re.S | re.I)
+        title = m.group(1).strip() if m else "sans titre"
+        fail(f"Aucun article trouve dans la page (titre : {title}, {len(html)} caracteres)")
+    return host, items[:40]
 
 
 def price_text(item):
     p = item.get("price")
+    if p is None:
+        return ""
     if isinstance(p, dict):
         return f"{p.get('amount')} {p.get('currency_code', '')}".strip()
     return f"{p} {item.get('currency', '')}".strip()
