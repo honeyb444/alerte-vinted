@@ -2,7 +2,7 @@ name: Alerte Vinted
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -15,6 +15,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 7
     steps:
       - uses: actions/checkout@v4
 
@@ -27,6 +28,8 @@ jobs:
       - name: Vérifier la recherche Vinted
         run: python vinted_alert.py
         env:
+          LOOP_SECONDS: "270"
+          LOOP_PAUSE: "60"
           SEARCH_URL: ${{ secrets.SEARCH_URL }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
