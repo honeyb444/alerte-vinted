@@ -32,6 +32,7 @@ jobs:
           LOOP_PAUSE: "60"
           SEARCH_URL: ${{ secrets.SEARCH_URL }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
