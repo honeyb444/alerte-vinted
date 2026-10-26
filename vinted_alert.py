@@ -19,7 +19,15 @@ import requests
 SEEN_FILE = "seen.json"
 MAX_SEEN = 500
 
-SEARCH_URL = os.environ["SEARCH_URL"].strip()
+def fail(msg):
+    # Le préfixe ::error:: fait apparaître le message dans les annotations de GitHub
+    print("::error::" + " ".join(str(msg).split())[:400])
+    sys.exit(1)
+
+
+SEARCH_URL = os.environ.get("SEARCH_URL", "").strip()
+if not SEARCH_URL.startswith("http"):
+    fail("Le secret SEARCH_URL est absent ou ne commence pas par https://")
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK", "").strip()
 GMAIL_USER = os.environ.get("GMAIL_USER", "").strip()
 GMAIL_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "").strip()
@@ -45,9 +53,7 @@ def fetch_items():
     session.get(f"https://{host}/", timeout=20)
     r = session.get(f"https://{host}/api/v2/catalog/items", params=params, timeout=20)
     if r.status_code != 200:
-        print(f"Erreur Vinted : HTTP {r.status_code}")
-        print(r.text[:300])
-        sys.exit(1)
+        fail(f"Vinted a repondu HTTP {r.status_code} : {r.text[:150]}")
     return host, r.json().get("items", [])
 
 
@@ -81,8 +87,7 @@ def send_discord(text):
                 continue
             break
         if r.status_code >= 300:
-            print(f"Erreur Discord : HTTP {r.status_code} {r.text[:200]}")
-            sys.exit(1)
+            fail(f"Discord a repondu HTTP {r.status_code} : {r.text[:150]}")
 
 
 def send_mail(subject, body):
@@ -98,8 +103,7 @@ def send_mail(subject, body):
 
 def notify(subject, body):
     if not DISCORD_WEBHOOK and not (GMAIL_USER and GMAIL_PASSWORD):
-        print("Aucun canal configuré : ajoute DISCORD_WEBHOOK ou les identifiants Gmail.")
-        sys.exit(1)
+        fail("Le secret DISCORD_WEBHOOK est absent")
     if DISCORD_WEBHOOK:
         send_discord(f"**{subject}**\n\n{body}")
     if GMAIL_USER and GMAIL_PASSWORD:
@@ -155,4 +159,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as e:
+        fail(f"{type(e).__name__}: {e}")
