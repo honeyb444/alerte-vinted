@@ -3,6 +3,7 @@
 Variables d'environnement :
   SEARCH_URL       lien de ta recherche Vinted (copié depuis le navigateur)
   DISCORD_WEBHOOK  adresse du webhook Discord
+  DISCORD_USER_ID  (optionnel) ton identifiant Discord : chaque alerte te mentionne
   LOOP_SECONDS     (optionnel) durée pendant laquelle le script boucle, en secondes
   LOOP_PAUSE       (optionnel) pause entre deux vérifications, 60 par défaut
 Optionnel pour l'e-mail : GMAIL_USER, GMAIL_APP_PASSWORD, MAIL_TO
@@ -38,6 +39,7 @@ SEARCH_URL = os.environ.get("SEARCH_URL", "").strip()
 if not SEARCH_URL.startswith("http"):
     fail("Le secret SEARCH_URL est absent ou ne commence pas par https://")
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK", "").strip()
+DISCORD_USER_ID = re.sub(r"\D", "", os.environ.get("DISCORD_USER_ID", ""))
 GMAIL_USER = os.environ.get("GMAIL_USER", "").strip()
 GMAIL_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "").strip()
 MAIL_TO = os.environ.get("MAIL_TO", "").strip() or GMAIL_USER
@@ -89,7 +91,7 @@ def fetch_items():
         m = re.search(r"<title>(.*?)</title>", page, re.S | re.I)
         title = m.group(1).strip() if m else "sans titre"
         fail(f"Aucun article trouve dans la page (titre : {title}, {len(page)} caracteres)")
-    return host, items[:40]
+    return host, items[:100]
 
 
 def enrich(item):
@@ -154,15 +156,22 @@ def send_discord(text):
     # Discord limite les messages à 2000 caractères : on découpe par blocs
     blocks, cur = [], ""
     for part in text.split("\n\n"):
-        if len(cur) + len(part) + 2 > 1900:
+        if len(cur) + len(part) + 2 > 1800:
             blocks.append(cur)
             cur = ""
         cur += part + "\n\n"
     if cur.strip():
         blocks.append(cur)
-    for block in blocks:
+    for i, block in enumerate(blocks):
+        payload = {"content": block.strip()}
+        if DISCORD_USER_ID and i == 0:
+            # Une mention déclenche une notification même si le salon est en « @mentions seulement »
+            payload["content"] = f"<@{DISCORD_USER_ID}> " + payload["content"]
+            payload["allowed_mentions"] = {"users": [DISCORD_USER_ID]}
+        else:
+            payload["allowed_mentions"] = {"parse": []}
         for _ in range(3):
-            r = requests.post(DISCORD_WEBHOOK, json={"content": block.strip()}, timeout=20)
+            r = requests.post(DISCORD_WEBHOOK, json=payload, timeout=20)
             if r.status_code == 429:
                 time.sleep(float(r.json().get("retry_after", 2)))
                 continue
@@ -199,8 +208,9 @@ def load_seen():
 
 
 def save_seen(ids):
+    # On garde les numéros les plus élevés (= les plus récents)
     with open(SEEN_FILE, "w") as f:
-        json.dump(ids[-MAX_SEEN:], f)
+        json.dump(sorted(set(ids))[-MAX_SEEN:], f)
 
 
 def main():
@@ -220,7 +230,13 @@ def main():
         return
 
     seen_set = set(seen)
-    new_items = [it for it in items if it["id"] not in seen_set]
+    # Les numéros d'articles augmentent avec le temps : un article plus ancien
+    # (numéro plus petit) qui réapparaît dans la page n'est pas une nouveauté.
+    max_seen = max(seen) if seen else 0
+    new_items = [
+        it for it in items if it["id"] not in seen_set and it["id"] > max_seen
+    ]
+    new_items.sort(key=lambda it: it["id"], reverse=True)
     if new_items:
         for it in new_items[:MAX_ENRICH]:
             enrich(it)
