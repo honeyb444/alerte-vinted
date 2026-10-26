@@ -1,0 +1,41 @@
+name: Alerte Vinted
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: alerte-vinted
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests
+
+      - name: Vérifier la recherche Vinted
+        run: python vinted_alert.py
+        env:
+          SEARCH_URL: ${{ secrets.SEARCH_URL }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+
+      - name: Sauvegarder les articles déjà vus
+        run: |
+          git config user.name "alerte-bot"
+          git config user.email "alerte-bot@users.noreply.github.com"
+          git add seen.json
+          git diff --cached --quiet || (git commit -m "maj articles vus" && git push)
