@@ -25,7 +25,8 @@ import requests
 sys.stdout.reconfigure(line_buffering=True)
 
 SEEN_FILE = "seen.json"
-MAX_SEEN = 500
+MAX_SEEN = 1000
+MAX_NEW_AT_ONCE = 20  # au-delà, on suppose que la page a été réorganisée
 MAX_ENRICH = 10  # nombre max d'articles dont on ouvre la page pour lire le prix
 
 LOOP_SECONDS = int(os.environ.get("LOOP_SECONDS") or 0)
@@ -211,41 +212,45 @@ def load_seen():
 
 
 def save_seen(ids):
-    # On garde les numéros les plus élevés (= les plus récents)
+    # On garde l'ordre d'arrivée, sans doublon, et on conserve les plus récents
+    unique = list(dict.fromkeys(ids))
     with open(SEEN_FILE, "w") as f:
-        json.dump(sorted(set(ids))[-MAX_SEEN:], f)
+        json.dump(unique[-MAX_SEEN:], f)
 
 
 def main():
     host, items = fetch_items()
     current_ids = [it["id"] for it in items]
     seen = load_seen()
-    print(
-        f"[{time.strftime('%H:%M:%S')}] {len(items)} articles lus ; "
-        f"plus grand numero dans la page : {max(current_ids)} ; "
-        f"plus grand numero deja vu : {max(seen) if seen else 'aucun'}"
-    )
 
     if seen is None:
         # Premier lancement : on mémorise l'existant sans spammer
         save_seen(current_ids)
+        print(f"[{time.strftime('%H:%M:%S')}] Initialisation : {len(items)} articles mémorisés.")
         notify(
             "Alerte Vinted activée",
             f"L'alerte fonctionne. {len(items)} articles actuels mémorisés.\n"
             "Tu recevras un message à chaque nouvel article.",
         )
-        print("Initialisation terminée.")
         return
 
     seen_set = set(seen)
-    # Les numéros d'articles augmentent avec le temps : un article plus ancien
-    # (numéro plus petit) qui réapparaît dans la page n'est pas une nouveauté.
-    max_seen = max(seen) if seen else 0
-    new_items = [
-        it for it in items if it["id"] not in seen_set and it["id"] > max_seen
-    ]
-    new_items.sort(key=lambda it: it["id"], reverse=True)
-    if new_items:
+    # Les numéros d'articles ne suivent pas l'ordre de publication :
+    # on se fie uniquement à la liste des articles déjà vus.
+    new_items = [it for it in items if it["id"] not in seen_set]
+    print(
+        f"[{time.strftime('%H:%M:%S')}] {len(items)} articles lus ; "
+        f"{len(new_items)} nouveaux ; {len(items) - len(new_items)} déjà connus"
+    )
+
+    if len(new_items) > MAX_NEW_AT_ONCE:
+        # Beaucoup d'articles « nouveaux » d'un coup : la page a sans doute été réorganisée
+        notify(
+            "Alerte Vinted : page réorganisée",
+            f"{len(new_items)} articles inconnus d'un coup. Je les ignore pour ne pas "
+            "t'envoyer de vieilles annonces. Les prochains seront envoyés normalement.",
+        )
+    elif new_items:
         for it in new_items[:MAX_ENRICH]:
             enrich(it)
             time.sleep(1)
@@ -260,7 +265,9 @@ def main():
     else:
         print("Rien de nouveau.")
 
-    save_seen(seen + [i for i in current_ids if i not in seen_set])
+    # Les articles de la page passent en fin de liste : ils restent « connus » tant qu'ils y sont
+    cur = set(current_ids)
+    save_seen([i for i in seen if i not in cur] + current_ids)
 
 
 def run():
