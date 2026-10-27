@@ -21,6 +21,9 @@ from urllib.parse import parse_qsl, urlparse
 
 import requests
 
+# Écrit chaque ligne tout de suite dans le journal (sinon elle reste en mémoire)
+sys.stdout.reconfigure(line_buffering=True)
+
 SEEN_FILE = "seen.json"
 MAX_SEEN = 500
 MAX_ENRICH = 10  # nombre max d'articles dont on ouvre la page pour lire le prix
@@ -217,6 +220,11 @@ def main():
     host, items = fetch_items()
     current_ids = [it["id"] for it in items]
     seen = load_seen()
+    print(
+        f"[{time.strftime('%H:%M:%S')}] {len(items)} articles lus ; "
+        f"plus grand numero dans la page : {max(current_ids)} ; "
+        f"plus grand numero deja vu : {max(seen) if seen else 'aucun'}"
+    )
 
     if seen is None:
         # Premier lancement : on mémorise l'existant sans spammer
